@@ -2,6 +2,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$ROOT/.workshop.env"
+# Hard cap on ECS tasks to protect attendee credit; deliberately not read from the environment.
+readonly MAX_TASKS=4
 load_state(){ [[ -f "$STATE" ]] && source "$STATE"; }
 need(){ command -v "$1" >/dev/null || { echo "Missing required command: $1" >&2; exit 1; }; }
 aws_region(){ aws configure get region 2>/dev/null || true; }

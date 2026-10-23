@@ -10,6 +10,7 @@ if [[ "$LISTENER_ARN" == "None" ]]; then LISTENER_ARN="$(aws elbv2 create-listen
 cat > /tmp/taskdef.json <<JSON
 {"family":"$TASK_FAMILY","networkMode":"awsvpc","requiresCompatibilities":["FARGATE"],"cpu":"256","memory":"512","executionRoleArn":"$EXEC_ROLE_ARN","containerDefinitions":[{"name":"worker","image":"$IMAGE_URI","essential":true,"portMappings":[{"containerPort":8080,"protocol":"tcp"}],"logConfiguration":{"logDriver":"awslogs","options":{"awslogs-group":"$LOG_GROUP","awslogs-region":"$AWS_REGION","awslogs-stream-prefix":"worker"}}}]}
 JSON
+# Deploys always start at 1 task; scaling goes through 04-scale.sh, which enforces MAX_TASKS.
 TASK_DEF_ARN="$(aws ecs register-task-definition --cli-input-json file:///tmp/taskdef.json --query 'taskDefinition.taskDefinitionArn' --output text)"
 if aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME" --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
  aws ecs update-service --cluster "$CLUSTER_NAME" --service "$SERVICE_NAME" --task-definition "$TASK_DEF_ARN" --desired-count 1 --force-new-deployment >/dev/null

@@ -81,7 +81,9 @@ Use another shell (standard CloudShell is fine for AWS API calls) to scale:
 ./scripts/04-scale.sh 2
 ```
 
-Maximum: 4 tasks.
+Maximum: 4 tasks. The cap is enforced by `04-scale.sh` (via `MAX_TASKS` in `scripts/common.sh`), and while a round is running the monitor scales any service above 4 back down to 4. After a scored round the monitor scales the service to 0 so idle tasks don't keep spending credit.
+
+Instructor note: ECS has no built-in limit on desired count, so the monitor only enforces the cap during a round. To enforce it at the account level, lower the Fargate On-Demand vCPU Service Quota (or use an SCP) in student accounts.
 
 Then:
 
@@ -99,8 +101,11 @@ The scored profile is ~10 minutes. The terminal shows time, desired/running/heal
 - Running tasks continuously consume game credits.
 - Completed requests increase score; missed requests hurt score; remaining credits provide an efficiency bonus.
 - Students therefore manually right-size desired count between 0 and 4.
+- Each scored round varies a little: spike timing and height are jittered per run from a seed, while total load and the overall shape stay the same. The seed is printed; `GAME_SEED=<seed> ./game/run-game.sh scored` replays a round.
+- The monitor line shows demand forecasts (for example "Heavy demand predicted soon") about 45 s before each change, so players have time to scale.
+- The final summary includes a theoretical max score (perfect instant scaling) and an **efficiency %**. Use the efficiency % to compare players across different seeds.
 
-Tune `game/game.js`, `WORK_MS`, and `burn_per_task_per_sec` after rehearsal. Do not treat the included balance as final until tested with real Fargate startup/ALB health-check timing.
+Tune the stages and jitter in `game/round_plan.py`, `WORK_MS`, and `BURN_PER_TASK_PER_SEC` after rehearsal. Do not treat the included balance as final until tested with real Fargate startup/ALB health-check timing.
 
 ## Status
 
