@@ -1,6 +1,6 @@
 # ECS Worker Rush — independent AWS workshop bundle
 
-Each attendee deploys a private worker service in their own AWS account. The workshop focuses on **Kiro -> Docker -> ECR -> ECS/Fargate -> manual scaling**. IAM, networking, logging, and ALB plumbing are scripted.
+Each attendee deploys a private worker service in their own AWS account. The workshop focuses on **Kiro -> Docker -> ECR -> ECS/Fargate -> manual scaling**. IAM, networking, logging, and ALB plumbing are scripted. To see what each script does and why, read [SCRIPTS.md](SCRIPTS.md).
 
 ## Important assumptions
 
