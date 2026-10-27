@@ -29,7 +29,15 @@ This creates everything around your container. You don't build any of it by hand
 | **Two security groups** | *ALB SG*: allows port 8080 only from resources in the same group, which is why your game shell must be attached to it. *Task SG*: allows port 8080 only from the ALB. Your containers can't be reached directly, only through the load balancer. |
 | **Internal Application Load Balancer** | A single, stable address that spreads requests across however many containers are running. It's `internal`, so it can't be reached from the internet. |
 
-At the end, every ID is saved to `.workshop.env`, and the script prints the ALB's DNS name.
+At the end, every ID is saved to `.workshop.env`, and the script prints the ALB's DNS name. It then runs `setup-game.sh` so the game is ready before you start.
+
+## `setup-game.sh`: the game runner
+
+Called by `00-bootstrap.sh`, so you don't run it yourself. It keeps the game out of your way:
+
+- Creates a second ECR repository (`ecs-worker-rush-game`) and builds and pushes `game/Dockerfile` to it. The game image bundles k6, the AWS CLI and the Python game scripts.
+- Creates a small **game task role** that can only describe and scale your worker service and read target health. The game uses it for the monitor and the task cap.
+- Registers a Fargate task definition for the game. It runs inside your VPC, so it can reach the internal ALB without a special CloudShell.
 
 ## `01-create-ecr.sh`: container registry
 
@@ -79,6 +87,12 @@ This prints two views of your service:
 
 These numbers often differ, and that's the point. A task can be *running* in ECS but not yet *healthy* in the ALB, and only healthy tasks get requests.
 
+## `06-run-game.sh`: play a round
+
+Usage: `./scripts/06-run-game.sh practice|scored`
+
+This starts the game container as a one-off Fargate task, using the same subnets and ALB security group (which is what lets it reach the load balancer). It passes in your cluster, service and target group, then streams the container's CloudWatch logs to your terminal until the round ends. Only one round can run at a time. Each monitor sample is a separate log line here, instead of one line redrawn in place.
+
 ## `99-cleanup.sh`: tear it all down
 
 This deletes the workshop resources in reverse order of their dependencies. The service is scaled to 0 and deleted first, then the listener, target group and ALB, then the security groups (which can't be deleted while the ALB uses them), then the cluster, log group, ECR repository (including images) and IAM role. Finally it deletes `.workshop.env`.
@@ -89,11 +103,13 @@ Errors are ignored so cleanup always finishes as much as it can. AWS takes a sho
 
 ## The game (`game/`)
 
+The game scripts run inside the game container, started by `06-run-game.sh`.
+
 ### `run-game.sh`: runs a round
 
-Usage: `./game/run-game.sh practice|scored`
+This is the container's entry point. The mode (`practice` or `scored`) is its argument.
 
-1. Picks a random **seed** and prints it in scored mode. Running `GAME_SEED=<seed> ./game/run-game.sh scored` replays the same round.
+1. Picks a random **seed** and prints it in scored mode. Running `GAME_SEED=<seed> ./scripts/06-run-game.sh scored` replays the same round.
 2. Runs `round_plan.py` to write this round's load schedule.
 3. Starts `monitor.py` in the background and **k6** in the foreground. Both run for the same length of time.
 4. When both finish, runs `score.py`.

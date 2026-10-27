@@ -33,4 +33,5 @@ if [[ -z "$ALB_ARN" || "$ALB_ARN" == "None" ]]; then ALB_ARN="$(aws elbv2 create
 ALB_DNS="$(aws elbv2 describe-load-balancers --load-balancer-arns "$ALB_ARN" --query 'LoadBalancers[0].DNSName' --output text)"
 for kv in AWS_REGION:$REGION ACCOUNT_ID:$ACCOUNT_ID PREFIX:$PREFIX CLUSTER_NAME:$CLUSTER_NAME LOG_GROUP:$LOG_GROUP EXEC_ROLE:$EXEC_ROLE EXEC_ROLE_ARN:$EXEC_ROLE_ARN VPC_ID:$VPC_ID SUBNET_1:${SUBNETS[0]} SUBNET_2:${SUBNETS[1]} ALB_SG:$ALB_SG TASK_SG:$TASK_SG ALB_NAME:$ALB_NAME ALB_ARN:$ALB_ARN ALB_DNS:$ALB_DNS; do put_state "${kv%%:*}" "${kv#*:}"; done
 printf 'Bootstrap complete.\nVPC: %s\nCluster: %s\nInternal ALB: %s\n' "$VPC_ID" "$CLUSTER_NAME" "$ALB_DNS"
-echo 'NOTE: the game load generator must run from a VPC-connected CloudShell environment using the ALB security group, or another client inside this VPC.'
+echo 'Setting up the game runner (builds and pushes the game image)...'
+bash "$(dirname "$0")/setup-game.sh"

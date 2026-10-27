@@ -28,9 +28,11 @@ while time.time()-start < duration:
     line=f'Time {left//60:02d}:{left%60:02d} | desired {desired} | running {running} | healthy {healthy} | credits {credits:5.1f}'
     hint=forecast(plan,elapsed)
     if hint: line+=f' | {hint}'
-    print('\r'+line.ljust(120),end='',flush=True)
+    # A terminal redraws one line; CloudWatch (the container case) needs one line per sample.
+    if sys.stdout.isatty(): print('\r'+line.ljust(120),end='',flush=True)
+    else: print(line,flush=True)
     time.sleep(2)
-print()
+if sys.stdout.isatty(): print()
 if mode=='scored':
     set_desired(0)
     print('Round over: service scaled to 0 tasks. Scale up again before the next round.')

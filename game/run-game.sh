@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"; source "$ROOT/scripts/common.sh"; load_state
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# In the game container there is no scripts/ directory or .workshop.env; settings arrive as environment variables.
+if [[ -f "$ROOT/scripts/common.sh" ]]; then source "$ROOT/scripts/common.sh"; load_state; fi
+MAX_TASKS="${MAX_TASKS:-4}"
 MODE="${1:-practice}"; [[ "$MODE" == practice || "$MODE" == scored ]] || { echo 'Usage: run-game.sh practice|scored'; exit 1; }
-command -v k6 >/dev/null || { echo 'k6 is required in this shell. See README for installation / VPC CloudShell setup.'; exit 1; }
+command -v k6 >/dev/null || { echo 'k6 is required. Normally the game runs in its container via scripts/06-run-game.sh.'; exit 1; }
 : "${ALB_DNS:?Run bootstrap/deploy first}"; export CLUSTER_NAME SERVICE_NAME TG_ARN MAX_TASKS
 TARGET_URL="http://$ALB_DNS:8080"; rm -f /tmp/k6-summary.json /tmp/game-monitor.json /tmp/game-schedule.json
 GAME_SEED="${GAME_SEED:-$RANDOM$RANDOM}"

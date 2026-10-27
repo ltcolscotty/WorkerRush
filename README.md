@@ -7,8 +7,8 @@ Each attendee deploys a private worker service in their own AWS account. The wor
 - AWS CLI v2 and Docker are available where image build/push commands run.
 - The account has a default VPC with at least two public subnets. This starter deliberately uses those subnets and public IPs for Fargate **egress** so tasks can pull from ECR; inbound worker traffic is still restricted to the internal ALB security group.
 - The attendee/lab role can create ECS, ECR, ELBv2, EC2 security groups, CloudWatch Logs, and the ECS task execution IAM role. If student roles cannot create IAM roles, an instructor/lab administrator should pre-create the execution role and adapt `00-bootstrap.sh`.
-- The load generator must have VPC reachability to the **internal** ALB. AWS CloudShell supports VPC environments: create one in this VPC/subnet and associate the ALB security group (or a dedicated client SG with an ALB ingress rule). Standard CloudShell is not assumed to reach the internal ALB.
-- k6 must be installed in the environment that runs `game/run-game.sh`.
+- The game load generator runs as a Fargate task inside the VPC (it has to reach the **internal** ALB), so attendees need no VPC CloudShell, k6, or game setup. Standard CloudShell is enough.
+- The attendee/lab role also needs to create the game's IAM task role (it can only describe/scale the worker service and read target health).
 
 ## 1. Bootstrap supporting AWS resources
 
@@ -16,7 +16,7 @@ Each attendee deploys a private worker service in their own AWS account. The wor
 ./scripts/00-bootstrap.sh
 ```
 
-This creates/reuses the ECS cluster, task execution role, log group, security groups, and internal ALB. Generated IDs are stored in `.workshop.env`.
+This creates/reuses the ECS cluster, task execution role, log group, security groups, and internal ALB. It also builds and pushes the **game runner image** (`game/Dockerfile`) to its own ECR repository and registers its ECS task, so attendees only work with the worker image. Generated IDs are stored in `.workshop.env`. Docker is required for this step.
 
 ## 2. Generate the Dockerfile with Kiro
 
@@ -51,28 +51,17 @@ Test `http://localhost:8080/health`.
 
 The task definition uses 0.25 vCPU / 0.5 GB, port 8080, `awsvpc`, Fargate, CloudWatch logs, and the ECR image. The ECS service begins at desired count 1 and registers task ENIs in an `ip` target group behind the internal ALB.
 
-## 5. Prepare the private game shell
+## 5. Practice and scored rounds
 
-In AWS CloudShell, create a **VPC environment** attached to the VPC/subnet from `.workshop.env`. It needs network permission to reach the internal ALB on TCP 8080. Copy/clone this project into that environment and install k6 according to your lab image/package policy.
-
-Verify:
+The game runs as a task in your VPC and streams its status line back to your terminal. A healthy worker must be registered before you start. Keep one shell for the game:
 
 ```bash
-source .workshop.env
-curl "http://$ALB_DNS:8080/health"
+./scripts/06-run-game.sh practice
 ```
 
-A 200 response means the load generator can reach the private worker service.
+The game container takes about a minute to start. To replay an earlier scored round: `GAME_SEED=<seed> ./scripts/06-run-game.sh scored`. Only one round can run at a time. Press Ctrl-C to stop watching; the round keeps running.
 
-## 6. Practice and scored rounds
-
-Keep one shell for the game:
-
-```bash
-./game/run-game.sh practice
-```
-
-Use another shell (standard CloudShell is fine for AWS API calls) to scale:
+Use another shell to scale:
 
 ```bash
 ./scripts/04-scale.sh 1
@@ -88,10 +77,10 @@ Instructor note: ECS has no built-in limit on desired count, so the monitor only
 Then:
 
 ```bash
-./game/run-game.sh scored
+./scripts/06-run-game.sh scored
 ```
 
-The scored profile is ~10 minutes. The terminal shows time, desired/running/healthy capacity, and remaining **game credits**. The final score is revealed after the round. Credits are simulated game currency and have no relationship to AWS billing.
+The scored profile is ~10 minutes. The output shows time, desired/running/healthy capacity, and remaining **game credits**. The final score is revealed after the round. Credits are simulated game currency and have no relationship to AWS billing.
 
 ## Game model
 
@@ -101,7 +90,7 @@ The scored profile is ~10 minutes. The terminal shows time, desired/running/heal
 - Running tasks continuously consume game credits.
 - Completed requests increase score; missed requests hurt score; remaining credits provide an efficiency bonus.
 - Students therefore manually right-size desired count between 0 and 4.
-- Each scored round varies a little: spike timing and height are jittered per run from a seed, while total load and the overall shape stay the same. The seed is printed; `GAME_SEED=<seed> ./game/run-game.sh scored` replays a round.
+- Each scored round varies a little: spike timing and height are jittered per run from a seed, while total load and the overall shape stay the same. The seed is printed; `GAME_SEED=<seed> ./scripts/06-run-game.sh scored` replays a round.
 - The monitor line shows demand forecasts (for example "Heavy demand predicted soon") about 45 s before each change, so players have time to scale.
 - The final summary includes a theoretical max score (perfect instant scaling) and an **efficiency %**. Use the efficiency % to compare players across different seeds.
 
@@ -121,7 +110,7 @@ This intentionally shows both ECS service counts and ALB target health so studen
 ./scripts/99-cleanup.sh
 ```
 
-Cleanup removes workshop ECR/ECS/ALB/log/IAM/security-group resources but does not delete the account's default VPC/subnets.
+Cleanup removes workshop ECR/ECS/ALB/log/IAM/security-group resources (including the game runner) but does not delete the account's default VPC/subnets.
 
 ## Production/lab caveats
 
