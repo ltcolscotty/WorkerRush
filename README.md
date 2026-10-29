@@ -19,7 +19,7 @@ Each attendee deploys a private worker service in their own AWS account. The wor
 7. **CloudShell, two tabs:** play with `./scripts/06-run-game.sh practice|scored` in one and `./scripts/04-scale.sh N` in the other.
 8. **CloudShell:** `./scripts/99-cleanup.sh` when you are done.
 
-Each step is explained below. Everything after step 2 runs from the `WorkerRush` folder in CloudShell. The project and your `.workshop.env` live in your CloudShell home directory, which survives session timeouts. If the session is reset, `cd WorkerRush` and carry on.
+Each step is explained below, and [See it in the console](#see-it-in-the-console) shows where to watch each one in the AWS dashboards. Everything after step 2 runs from the `WorkerRush` folder in CloudShell. The project and your `.workshop.env` live in your CloudShell home directory, which survives session timeouts. If the session is reset, `cd WorkerRush` and carry on.
 
 ## Important assumptions
 
@@ -141,6 +141,28 @@ Tune the stages and jitter in `game/round_plan.py`, `WORK_MS`, and `BURN_PER_TAS
 ```
 
 This intentionally shows both ECS service counts and ALB target health so students can see that desired, running, and load-balancer-ready capacity are different states.
+
+## See it in the console
+
+The scripts do the work, but everything they create is visible in the AWS console. Open these as you go, with the console's **region set to the same region as CloudShell** (top right). The names below assume the default `ecs-worker-rush` prefix.
+
+| After this step | Where to look | What you'll see |
+|---|---|---|
+| `00-bootstrap.sh` | **ECS → Clusters → `ecs-worker-rush-cluster`** | An empty cluster. With Fargate it is only a label for your tasks. |
+| | **EC2 → Load Balancers → `ecs-worker-rush-alb`** | An *internal* load balancer with a listener on port 8080 (it gets its forwarding rule after the deploy). |
+| | **EC2 → Security Groups** (`ecs-worker-rush-alb-sg`, `ecs-worker-rush-task-sg`) | The inbound rules that let only the load balancer reach your containers. |
+| | **IAM → Roles** (`ecs-worker-rush-exec-role`, `ecs-worker-rush-game-role`) | The role ECS uses to pull images and write logs, and the game's limited role. |
+| `01-create-ecr.sh` and your push | **ECR → Private repositories → `ecs-worker-rush-worker`** | Your image and its tag (`v1`), size, push time, and the vulnerability scan results. |
+| `03-deploy-ecs.sh` | **ECS → Task definitions → `ecs-worker-rush-task`** | The blueprint: image, 0.25 vCPU / 0.5 GB, port 8080, log settings. Each deploy adds a revision. |
+| | **ECS → Clusters → … → Services → `ecs-worker-rush-service`** | The **Tasks** tab (running containers and their IPs), **Deployments**, **Events** (a plain-language log of what ECS is doing), and **Health and metrics** (CPU and memory). |
+| | **EC2 → Target Groups → `ecs-worker-rush-tg` → Targets** | Each task's health: `initial`, then `healthy`. This is the same data as `05-status.sh`. |
+| `04-scale.sh` and the game | The service's **Tasks** tab | Tasks appear as you scale up and go away as you scale down. Filter by **Stopped** to see why a task stopped. |
+| | **ECS → Clusters → … → Tasks** | The game's own task (`ecs-worker-rush-game`) while a round is running. |
+| Any time | **CloudWatch → Logs → Log groups → `/workshop/ecs-worker-rush`** | One stream per container: `worker/worker/<task-id>` for workers and `game/game/<task-id>` for game rounds. This is where `print` and `uvicorn` output ends up. |
+
+Things worth trying: scale to 3 and watch the target group while the new tasks go from `initial` to `healthy`; open a worker's log stream while the game runs and watch the `POST /job` requests arrive; look at the service's **Events** tab after a deploy.
+
+After `99-cleanup.sh`, refresh the same pages to see the resources disappear. The load balancer and security groups can take a few minutes to go.
 
 ## Cleanup
 
