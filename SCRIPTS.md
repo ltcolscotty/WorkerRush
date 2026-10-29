@@ -12,6 +12,8 @@ All scripts follow a few common conventions:
   - `MAX_TASKS=4`: the workshop's hard limit on how many containers can run, which protects your credit.
 - **Safe to re-run.** Most scripts look for a resource before creating it (`describe-…` first, `create-…` only if nothing was found). If a step fails partway through, fix the problem and run the same script again.
 - **Strict mode.** `set -euo pipefail` makes a script stop at the first failed command instead of carrying on with missing values.
+- **Failures are loud.** If a command fails, `common.sh` prints the script, line and command that failed. Scripts that need something from an earlier step say which script to run first, rather than failing on a missing value.
+- **Nothing is orphaned.** State is saved as each resource is created, so `99-cleanup.sh` can always find what a half-finished run created.
 
 ---
 
@@ -46,20 +48,32 @@ This creates a private **Amazon ECR repository** (`ecs-worker-rush-worker`) to s
 - `scanOnPush=true` makes ECR scan each pushed image for known vulnerabilities, which is free and a good habit.
 - It saves the repository URI (`<account>.dkr.ecr.<region>.amazonaws.com/<repo>`) to `.workshop.env`.
 
-## `02-push-image.sh`: upload your image
+## `02-local-push-commands.sh`: push without the AWS CLI
+
+Usage (in CloudShell): `./scripts/02-local-push-commands.sh [tag] [local-image]` (defaults: `v1`, `worker-rush:latest`).
+
+CloudShell already has AWS credentials, so it gets a temporary ECR login token and prints the exact `docker` commands for you to paste on the machine where you built the image: check the architecture, `docker login`, `docker tag`, `docker push`. That machine needs only Docker. The token is valid for 12 hours and works like a password, so don't share it. The tag and image name are limited to harmless characters because they end up in commands you paste.
+
+## `02-push-image.sh`: upload your image (alternative)
+
+Use this instead if you do have the AWS CLI and credentials where the image was built.
 
 Usage: `./scripts/02-push-image.sh [tag] [local-image]` (defaults: `v1`, `worker-rush:latest`).
 
+This is the one script meant to run on your own machine rather than CloudShell. It doesn't use `.workshop.env`: it looks up your account ID from your credentials and builds the repository address from your region and the workshop prefix. If the repository isn't found, it tells you which account and region it looked in, because a different region on your laptop than in CloudShell is the likely cause.
+
 1. **Log in:** `aws ecr get-login-password` gets a temporary token, which is passed to `docker login`. This lets Docker push to your private registry without storing long-lived credentials.
 2. **Tag:** `docker tag` gives your local image its full ECR name plus a version tag (for example `…/ecs-worker-rush-worker:v1`). Docker uses the image's name to decide which registry to push to.
-3. **Push:** `docker push` uploads the image layers.
+3. **Push:** `docker push` uploads the image layers. Before any of this, the script checks that the local image exists and is `amd64`, because an image for another CPU type would fail on Fargate.
 4. Saves the full `IMAGE_URI` so the deploy step knows exactly which version to run.
 
 Use a new tag for each change (`v2`, `v3`, …) so it's always clear which version ECS is running.
 
 ## `03-deploy-ecs.sh`: run it on Fargate
 
-This connects the image to the load balancer and starts it.
+Usage: `./scripts/03-deploy-ecs.sh [tag]` (default: the last tag pushed from this machine, otherwise `v1`).
+
+This connects the image to the load balancer and starts it. It first checks that the tag exists in ECR, because the image may have been pushed from a different machine than the one running this script.
 
 1. **Target group:** the list of container IPs that the ALB sends traffic to. It's type `ip` because each Fargate task gets its own network interface and IP address. It checks `GET /health` every 10 s, and a container gets traffic only after two successful checks in a row.
 2. **Listener:** tells the ALB to accept traffic on port 8080 and forward it to the target group.
@@ -67,7 +81,8 @@ This connects the image to the load balancer and starts it.
 4. **Service:** keeps the requested number of copies (*tasks*) of the task definition running, replaces any that crash, and registers each task with the target group. The first run creates the service. Later runs update it to the new revision and force a fresh rollout. Deploys always start at **1 task**.
    - The tasks get public IPs only so they can download the image from ECR. Inbound traffic is still limited to the ALB by the task security group.
    - The 30 s health-check grace period gives a new container time to start before failed checks count against it.
-5. Waits until the service is stable, meaning the requested number of tasks are running.
+   - A *deployment circuit breaker* makes ECS stop retrying if tasks keep failing, so a broken image doesn't crash-loop forever.
+5. Waits (up to 5 minutes) until the rollout completes and the load balancer reports the task healthy. If it doesn't, the script prints the recent service events and why the last task stopped (for example a crash, or an image built for the wrong CPU architecture), then exits with an error.
 
 ## `04-scale.sh`: change capacity by hand
 
@@ -91,13 +106,13 @@ These numbers often differ, and that's the point. A task can be *running* in ECS
 
 Usage: `./scripts/06-run-game.sh practice|scored`
 
-This starts the game container as a one-off Fargate task, using the same subnets and ALB security group (which is what lets it reach the load balancer). It passes in your cluster, service and target group, then streams the container's CloudWatch logs to your terminal until the round ends. Only one round can run at a time. Each monitor sample is a separate log line here, instead of one line redrawn in place.
+This starts the game container as a one-off Fargate task, using the same subnets and ALB security group (which is what lets it reach the load balancer). It passes in your cluster, service and target group, then streams the container's CloudWatch logs to your terminal until the round ends. Only one round can run at a time, and the script gives up and stops the task if a round hasn't finished after 25 minutes. If the game fails to start or finishes with an error, the script says so and exits with an error. Each monitor sample is a separate log line here, instead of one line redrawn in place.
 
 ## `99-cleanup.sh`: tear it all down
 
 This deletes the workshop resources in reverse order of their dependencies. The service is scaled to 0 and deleted first, then the listener, target group and ALB, then the security groups (which can't be deleted while the ALB uses them), then the cluster, log group, ECR repository (including images) and IAM role. Finally it deletes `.workshop.env`.
 
-Errors are ignored so cleanup always finishes as much as it can. AWS takes a short time to release some resources, so if a security group reports a "dependency" error, wait a minute and run the script again. Your default VPC and subnets are never touched.
+Cleanup works out resource names from your prefix, so it also works after a setup that failed part-way. It waits for the service and load balancer to finish deleting, and retries security groups and the cluster for a few minutes while AWS releases network interfaces. Each step prints `ok`, `absent` (already gone) or `FAILED`. `.workshop.env` is deleted only when nothing failed, so if something did, fix the cause and run the script again. Your default VPC and subnets are never touched.
 
 ---
 
@@ -134,7 +149,8 @@ Every 2 seconds, this:
 - Deducts **game credits** for each running task. These are game points, not AWS billing.
 - Shows a **forecast** about 45 s before demand changes, so you have time to scale.
 - **Enforces the cap:** if the service is ever set above 4 tasks (from the console or a raw CLI command, for example), the monitor sets it back to 4.
-- After a **scored** round, scales the service to 0 so idle containers don't keep spending your AWS credit.
+- After a **scored** round, scales the service to 0 so idle containers don't keep spending your AWS credit. `run-game.sh` does the same if a round is interrupted or fails.
+- Reports AWS errors instead of hiding them, and ends the round if it can't read the service.
 
 ### `score.py`: the result
 

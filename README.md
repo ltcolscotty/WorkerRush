@@ -2,15 +2,40 @@
 
 Each attendee deploys a private worker service in their own AWS account. The workshop focuses on **Kiro -> Docker -> ECR -> ECS/Fargate -> manual scaling**. IAM, networking, logging, and ALB plumbing are scripted. To see what each script does and why, read [SCRIPTS.md](SCRIPTS.md).
 
+## Attendee quick path
+
+1. **Your machine:** clone the project and open it in Kiro.
+   ```bash
+   git clone https://github.com/ltcolscotty/WorkerRush.git
+   ```
+2. **CloudShell** (AWS console, top bar): clone the same project, which gives you the scripts.
+   ```bash
+   git clone https://github.com/ltcolscotty/WorkerRush.git && cd WorkerRush
+   ```
+3. **CloudShell:** `./scripts/00-bootstrap.sh`, then `./scripts/01-create-ecr.sh`.
+4. **Your machine:** ask Kiro for the Dockerfile, then build and test the image (section 2).
+5. **CloudShell:** `./scripts/02-local-push-commands.sh v1 worker-rush:latest`. Paste the commands it prints on your machine to push the image.
+6. **CloudShell:** `./scripts/03-deploy-ecs.sh v1`.
+7. **CloudShell, two tabs:** play with `./scripts/06-run-game.sh practice|scored` in one and `./scripts/04-scale.sh N` in the other.
+8. **CloudShell:** `./scripts/99-cleanup.sh` when you are done.
+
+Each step is explained below. Everything after step 2 runs from the `WorkerRush` folder in CloudShell. The project and your `.workshop.env` live in your CloudShell home directory, which survives session timeouts. If the session is reset, `cd WorkerRush` and carry on.
+
 ## Important assumptions
 
-- AWS CLI v2 and Docker are available where image build/push commands run.
+- AWS CloudShell has the AWS CLI v2 and Docker (the bootstrap builds the game image there). Attendees' own machines need only Docker for the worker image.
 - The account has a default VPC with at least two public subnets. This starter deliberately uses those subnets and public IPs for Fargate **egress** so tasks can pull from ECR; inbound worker traffic is still restricted to the internal ALB security group.
 - The attendee/lab role can create ECS, ECR, ELBv2, EC2 security groups, CloudWatch Logs, and the ECS task execution IAM role. If student roles cannot create IAM roles, an instructor/lab administrator should pre-create the execution role and adapt `00-bootstrap.sh`.
 - The game load generator runs as a Fargate task inside the VPC (it has to reach the **internal** ALB), so attendees need no VPC CloudShell, k6, or game setup. Standard CloudShell is enough.
 - The attendee/lab role also needs to create the game's IAM task role (it can only describe/scale the worker service and read target health).
 
+## Where each step runs
+
+Everything AWS-related runs in **AWS CloudShell**: bootstrap, ECR creation, deploy, scaling, game rounds and cleanup. Your own machine only needs **Docker** (plus Kiro): you build, test and push the worker image there, with no AWS CLI and no AWS credentials. The two sides share no files: CloudShell prints the push commands, and deploy reads the image from ECR.
+
 ## 1. Bootstrap supporting AWS resources
+
+Run this **in CloudShell**:
 
 ```bash
 ./scripts/00-bootstrap.sh
@@ -37,15 +62,28 @@ Test `http://localhost:8080/health`.
 
 ## 3. ECR
 
+Create the repository **in CloudShell**:
+
 ```bash
 ./scripts/01-create-ecr.sh
-./scripts/02-push-image.sh v1 worker-rush:latest
 ```
+
+Then get the image into ECR **without installing the AWS CLI on your own machine**. In CloudShell, run:
+
+```bash
+./scripts/02-local-push-commands.sh v1 worker-rush:latest
+```
+
+It prints a short list of `docker` commands (a Fargate-architecture check, `docker login` with a 12-hour ECR token, `docker tag`, and `docker push`). Paste them into a terminal on the machine where you built the image. They work in bash, PowerShell and cmd, and only need Docker. Treat the token like a password.
+
+If you do have the AWS CLI and credentials on that machine, `./scripts/02-push-image.sh v1 worker-rush:latest` does the same push in one step. It needs the same account and region as CloudShell.
 
 ## 4. ECS/Fargate
 
+Back **in CloudShell**, deploy the tag you pushed (it is checked against ECR first):
+
 ```bash
-./scripts/03-deploy-ecs.sh
+./scripts/03-deploy-ecs.sh v1
 ./scripts/05-status.sh
 ```
 

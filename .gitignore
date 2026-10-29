@@ -1,3 +1,5 @@
 .workshop.env
 __pycache__/
 *.pyc
+
+worker/Dockerfile
